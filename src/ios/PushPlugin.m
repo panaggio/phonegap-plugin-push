@@ -23,11 +23,7 @@
  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-//  See GGLInstanceID.h
-#define GMP_NO_MODULES true
-
 #import "PushPlugin.h"
-#import "CloudMessaging.h"
 
 @implementation PushPlugin : CDVPlugin
 
@@ -41,65 +37,6 @@
 @synthesize clearBadge;
 @synthesize handlerObj;
 
-@synthesize usesGCM;
-@synthesize gcmSandbox;
-@synthesize gcmSenderId;
-@synthesize gcmRegistrationOptions;
-@synthesize gcmRegistrationHandler;
-@synthesize gcmRegistrationToken;
-@synthesize gcmTopics;
-
--(void)initGCMRegistrationHandler;
-{
-    __weak __block PushPlugin *weakSelf = self;
-    gcmRegistrationHandler = ^(NSString *registrationToken, NSError *error){
-        if (registrationToken != nil) {
-            NSLog(@"GCM Registration Token: %@", registrationToken);
-            [weakSelf setGcmRegistrationToken: registrationToken];
-
-            id topics = [weakSelf gcmTopics];
-            if (topics != nil) {
-                for (NSString *topic in topics) {
-                    NSLog(@"subscribe from topic: %@", topic);
-                    id pubSub = [GCMPubSub sharedInstance];
-                    [pubSub subscribeWithToken: [weakSelf gcmRegistrationToken]
-                        topic:[NSString stringWithFormat:@"/topics/%@", topic]
-                        options:nil
-                        handler:^void(NSError *error) {
-                            if (error) {
-                                if (error.code == 3001) {
-                                    NSLog(@"Already subscribed to %@", topic);
-                                } else {
-                                    NSLog(@"Failed to subscribe to topic %@: %@", topic, error);
-                                }
-                            }
-                            else {
-                                NSLog(@"Successfully subscribe to topic %@", topic);
-                            }
-                    }];
-                }
-            }
-
-            [weakSelf registerWithToken:registrationToken];
-        } else {
-            NSLog(@"Registration to GCM failed with error: %@", error.localizedDescription);
-            [weakSelf failWithMessage:@"" withError:error];
-        }
-    };
-}
-
-//  GCM refresh token
-//  Unclear how this is testable under normal circumstances
-- (void)onTokenRefresh {
-#if !TARGET_IPHONE_SIMULATOR
-    // A rotation of the registration tokens is happening, so the app needs to request a new token.
-    NSLog(@"The GCM registration token needs to be changed.");
-    [[GGLInstanceID sharedInstance] tokenWithAuthorizedEntity:[self gcmSenderId]
-                                                        scope:kGGLInstanceIDScopeGCM
-                                                      options:[self gcmRegistrationOptions]
-                                                      handler:[self gcmRegistrationHandler]];
-#endif
-}
 
 - (void)willSendDataMessageWithID:(NSString *)messageID error:(NSError *)error {
     NSLog(@"willSendDataMessageWithID");
@@ -293,28 +230,6 @@
          (UIRemoteNotificationTypeBadge | UIRemoteNotificationTypeSound | UIRemoteNotificationTypeAlert)];
 #endif
 
-        //  GCM options
-        [self setGcmSenderId: [iosOptions objectForKey:@"senderID"]];
-        NSLog(@"GCM Sender ID %@", gcmSenderId);
-        if([[self gcmSenderId] length] > 0) {
-            NSLog(@"Using GCM Notification");
-            [self setUsesGCM: YES];
-            [self initGCMRegistrationHandler];
-        } else {
-            NSLog(@"Using APNS Notification");
-            [self setUsesGCM:NO];
-        }
-        id gcmSandBoxArg = [iosOptions objectForKey:@"gcmSandbox"];
-
-        [self setGcmSandbox:@NO];
-        if ([self usesGCM] &&
-            (([gcmSandBoxArg isKindOfClass:[NSString class]] && [gcmSandBoxArg isEqualToString:@"true"]) ||
-             [gcmSandBoxArg boolValue]))
-        {
-            NSLog(@"Using GCM Sandbox");
-            [self setGcmSandbox:@YES];
-        }
-
         if (notificationMessage)			// if there is a pending startup notification
             [self notificationReceived];	// go ahead and process it
 
@@ -402,26 +317,7 @@
     [results setValue:dev.model forKey:@"deviceModel"];
     [results setValue:dev.systemVersion forKey:@"deviceSystemVersion"];
 
-    if([self usesGCM]) {
-        GGLInstanceIDConfig *instanceIDConfig = [GGLInstanceIDConfig defaultConfig];
-        instanceIDConfig.delegate = self;
-        [[GGLInstanceID sharedInstance] startWithConfig:instanceIDConfig];
-
-        [self setGcmRegistrationOptions: @{kGGLInstanceIDRegisterAPNSOption:deviceToken,
-                                           kGGLInstanceIDAPNSServerTypeSandboxOption:[self gcmSandbox]}];
-
-        [[GGLInstanceID sharedInstance] tokenWithAuthorizedEntity:[self gcmSenderId]
-                                                            scope:kGGLInstanceIDScopeGCM
-                                                          options:[self gcmRegistrationOptions]
-                                                          handler:[self gcmRegistrationHandler]];
-
-        GCMConfig *gcmConfig = [GCMConfig defaultConfig];
-        gcmConfig.receiverDelegate = self;
-        [[GCMService sharedInstance] startWithConfig:gcmConfig];
-
-    } else {
-        [self registerWithToken: token];
-    }
+    [self registerWithToken: token];
 #endif
 }
 
